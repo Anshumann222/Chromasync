@@ -44,10 +44,6 @@ public class SpotifyAmbientColorDetector
                     return true; // skip tooltips / tiny popups
 
                 found = hwnd;
-                var sb = new StringBuilder(256);
-                NativeMethods.GetWindowText(hwnd, sb, sb.Capacity);
-                Console.WriteLine($"[SpotifyDetector] Matched Spotify window: '{sb}' (Client Rect: {rect.Width}x{rect.Height})");
-
                 return false; // stop enumerating, this is the main window
             }
             catch
@@ -57,10 +53,6 @@ public class SpotifyAmbientColorDetector
         }, IntPtr.Zero);
 
         hWnd = found;
-        if (found == IntPtr.Zero)
-        {
-            Console.WriteLine("[SpotifyDetector] No visible Spotify window found.");
-        }
         return found != IntPtr.Zero;
     }
 

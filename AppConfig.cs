@@ -41,7 +41,7 @@ public class AppConfig
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Couldn't read existing config ({ex.Message}); starting fresh.");
+                Logger.Warn($"Couldn't read existing config ({ex.Message}); starting fresh.");
             }
         }
 

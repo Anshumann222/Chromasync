@@ -34,18 +34,17 @@ public class ColorTransitionEngine
             _target = lab;
             _transitionFrom = lab;
             _hasColor = true;
-            Console.WriteLine($"[Transition] Initial target set: RGB({color.R},{color.G},{color.B}) [Lab L={lab.L:F1}, a={lab.a:F1}, b={lab.b:F1}]");
+            Logger.Info($"[Transition] Initial target set: RGB({color.R},{color.G},{color.B}) [Lab L={lab.L:F1}, a={lab.a:F1}, b={lab.b:F1}]");
             return;
         }
 
         double distance = LabDistance(lab, _target);
         if (distance < _changeThreshold)
         {
-            Console.WriteLine($"[Transition] Ignored color change as noise (Lab dist: {distance:F2} < threshold: {_changeThreshold:F1})");
             return; // treat as sampling noise, not a real color change
         }
 
-        Console.WriteLine($"[Transition] Accepted color change (Lab dist: {distance:F2} >= threshold: {_changeThreshold:F1}) -> RGB({color.R},{color.G},{color.B})");
+        Logger.Info($"[Transition] Accepted color change (Lab dist: {distance:F2} >= threshold: {_changeThreshold:F1}) -> RGB({color.R},{color.G},{color.B})");
         _transitionFrom = _current;
         _target = lab;
         _transitionStart = DateTime.UtcNow;

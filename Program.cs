@@ -1,114 +1,159 @@
+using System.Windows.Forms;
+
 namespace ChromaSync;
 
-internal class Program
+internal static class Program
 {
-    private static async Task Main(string[] args)
+    private static int _shutdownStarted = 0;
+    private static CancellationTokenSource? _cts;
+    private static MysticLightController? _light;
+
+    [STAThread]
+    private static void Main(string[] args)
     {
-        Console.WriteLine("ChromaSync — Spotify ambient color -> MSI Mystic Light");
-        Console.WriteLine();
+        ApplicationConfiguration.Initialize();
+
+        Logger.Info("========================================");
+        Logger.Info("ChromaSync starting up");
+        Logger.Info("========================================");
 
         var config = AppConfig.LoadOrCreate();
 
-        using var light = new MysticLightController();
-        if (!light.Initialize())
+        _light = new MysticLightController();
+        if (!_light.Initialize())
         {
-            Console.WriteLine("Could not start the Mystic Light SDK. Exiting.");
+            MessageBox.Show("Could not start the Mystic Light SDK.\n\nMake sure MysticLight_SDK.dll is present, MSI Center is installed, and ChromaSync is running as Administrator.",
+                "ChromaSync — Startup Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            Logger.Error("Mystic Light SDK initialization failed. Exiting.");
             return;
         }
 
         if (config.SelectedDeviceTypes.Count == 0 || args.Contains("--reconfigure"))
         {
-            if (!SelectDevices(light, config))
+            using var picker = new DevicePickerForm(_light.Devices, config.SelectedDeviceTypes);
+            if (picker.ShowDialog() != DialogResult.OK || picker.SelectedTypes.Count == 0)
             {
-                Console.WriteLine("No devices selected. Exiting.");
+                Logger.Info("No devices selected in picker. Exiting.");
+                _light.Release();
                 return;
             }
+
+            config.SelectedDeviceTypes = picker.SelectedTypes;
             config.Save();
+            Logger.Info($"Selected device(s): {string.Join(", ", config.SelectedDeviceTypes)}");
         }
 
         // Save original color state before applying any styles or color changes
-        light.SaveInitialColors(config.SelectedDeviceTypes);
+        _light.SaveInitialColors(config.SelectedDeviceTypes);
 
         foreach (var type in config.SelectedDeviceTypes)
         {
-            int infoStatus = MysticLightNative.GetLedInfo(type, 0, out var devName, out var styles);
-            Console.WriteLine($"[MysticLight-Diag] MLAPI_GetLedInfo(Type: '{type}', Index: 0) -> Status Code: {infoStatus}");
-            Console.WriteLine($"[MysticLight-Diag] Reported Name: '{devName}'");
-            if (styles is null)
-            {
-                Console.WriteLine("[MysticLight-Diag] Supported Styles: null");
-            }
-            else
-            {
-                Console.WriteLine($"[MysticLight-Diag] Supported Styles count: {styles.Length}");
-                for (int s = 0; s < styles.Length; s++)
-                {
-                    Console.WriteLine($"[MysticLight-Diag]   Style[{s}]: '{styles[s]}'");
-                }
-            }
-
-            light.SetLedStyle(type, 0, "Steady");
+            _light.SetLedStyle(type, 0, "Steady");
         }
 
-        Console.WriteLine($"Controlling: {string.Join(", ", config.SelectedDeviceTypes)}");
-        Console.WriteLine("Waiting for Spotify — open the Now Playing / expanded view for real ambient colors.");
-        Console.WriteLine("Press Ctrl+C to exit.");
-        Console.WriteLine();
+        Logger.Info($"Controlling devices: {string.Join(", ", config.SelectedDeviceTypes)}");
+        Logger.Info("Starting capture and render loops in background...");
 
         var detector = new SpotifyAmbientColorDetector();
         var engine = new ColorTransitionEngine(
             TimeSpan.FromMilliseconds(config.TransitionDurationMs),
             config.ColorChangeThreshold);
 
-        using var cts = new CancellationTokenSource();
+        _cts = new CancellationTokenSource();
 
-        void OnShutdown(object? sender, EventArgs e)
+        AppDomain.CurrentDomain.ProcessExit += (_, _) => Shutdown();
+        try
         {
-            try
+            Console.CancelKeyPress += (s, e) =>
             {
-                cts.Cancel();
-                light.RestoreOriginalState();
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[Shutdown] Error during shutdown cleanup: {ex.Message}");
-            }
+                e.Cancel = true;
+                Shutdown();
+            };
+        }
+        catch { }
+
+        var token = _cts.Token;
+        _ = Task.Run(() => CaptureLoop(detector, engine, config, token), token);
+        _ = Task.Run(() => RenderLoop(_light, engine, config, token), token);
+
+        using var trayContext = new TrayApplicationContext(_light, config, Shutdown);
+        Application.Run(trayContext);
+    }
+
+    private static void Shutdown()
+    {
+        if (Interlocked.Exchange(ref _shutdownStarted, 1) != 0)
+            return;
+
+        Logger.Info("[Shutdown] Initiating graceful shutdown...");
+
+        try
+        {
+            _cts?.Cancel();
+        }
+        catch (ObjectDisposedException) { }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[Shutdown] Warning cancelling tasks: {ex.Message}");
         }
 
-        Console.CancelKeyPress += (s, e) =>
+        try
         {
-            e.Cancel = true;
-            OnShutdown(s, e);
-        };
-        AppDomain.CurrentDomain.ProcessExit += OnShutdown;
+            _light?.RestoreOriginalState();
+        }
+        catch (Exception ex)
+        {
+            Logger.Error($"[Shutdown] Error restoring light state: {ex.Message}");
+        }
 
-        var captureTask = CaptureLoop(detector, engine, config, cts.Token);
-        var renderTask = RenderLoop(light, engine, config, cts.Token);
+        try
+        {
+            Application.Exit();
+        }
+        catch { }
 
-        await Task.WhenAll(captureTask, renderTask);
+        Logger.Info("[Shutdown] ChromaSync shutdown complete.");
     }
 
     private static async Task CaptureLoop(SpotifyAmbientColorDetector detector, ColorTransitionEngine engine,
         AppConfig config, CancellationToken token)
     {
+        bool lastSpotifyFound = false;
+
         while (!token.IsCancellationRequested)
         {
-            if (detector.TryFindSpotifyWindow(out var hWnd))
+            bool found = detector.TryFindSpotifyWindow(out var hWnd);
+
+            if (found != lastSpotifyFound)
+            {
+                lastSpotifyFound = found;
+                if (found)
+                {
+                    Logger.Info("[SpotifyDetector] Found active Spotify window.");
+                }
+                else
+                {
+                    Logger.Info("[SpotifyDetector] Lost Spotify window. Waiting for Spotify...");
+                }
+            }
+
+            if (found)
             {
                 var color = detector.CaptureAmbientColor(hWnd);
                 if (color is { } c)
                 {
-                    Console.WriteLine($"[Capture] Sampled ambient RGB: R={c.R}, G={c.G}, B={c.B}");
                     engine.SetTarget(c);
-                }
-                else
-                {
-                    Console.WriteLine("[Capture] Capture failed (bitmap capture returned null).");
                 }
             }
 
-            try { await Task.Delay(config.CaptureIntervalMs, token); }
-            catch (TaskCanceledException) { }
+            try
+            {
+                await Task.Delay(config.CaptureIntervalMs, token);
+            }
+            catch (TaskCanceledException)
+            {
+                break;
+            }
         }
     }
 
@@ -120,38 +165,14 @@ internal class Program
             var color = engine.Tick();
             light.SetColor(config.SelectedDeviceTypes, color);
 
-            try { await Task.Delay(config.HardwareUpdateIntervalMs, token); }
-            catch (TaskCanceledException) { }
+            try
+            {
+                await Task.Delay(config.HardwareUpdateIntervalMs, token);
+            }
+            catch (TaskCanceledException)
+            {
+                break;
+            }
         }
-    }
-
-    private static bool SelectDevices(MysticLightController light, AppConfig config)
-    {
-        if (light.Devices.Count == 0)
-        {
-            Console.WriteLine("Mystic Light didn't report any controllable devices.");
-            return false;
-        }
-
-        Console.WriteLine("Found these Mystic Light devices:");
-        for (int i = 0; i < light.Devices.Count; i++)
-        {
-            var d = light.Devices[i];
-            Console.WriteLine($"  [{i}] {d.Type}  ({d.LedCount} LED area(s))");
-        }
-
-        Console.WriteLine();
-        Console.Write("Enter the number(s) for your CPU cooler / fans, comma-separated (e.g. 0,2): ");
-        var input = Console.ReadLine() ?? string.Empty;
-
-        var selected = new List<string>();
-        foreach (var part in input.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-        {
-            if (int.TryParse(part, out int idx) && idx >= 0 && idx < light.Devices.Count)
-                selected.Add(light.Devices[idx].Type);
-        }
-
-        config.SelectedDeviceTypes = selected;
-        return selected.Count > 0;
     }
 }
