@@ -64,3 +64,4 @@ Three deliberately decoupled layers so future peripherals (Cosmic Byte Phantom T
   2. Implemented centralized rolling file logger (`Logger.cs` -> `chromasync.log`), quieted per-frame capture ticks, noise rejects, and status 0 hardware write logs.
   3. Fixed shutdown race condition on `CancellationTokenSource` with atomic flag guard so cleanup runs cleanly exactly once.
   4. Verified `dotnet build` succeeded with 0 warnings and 0 errors.
+- **2026-08-29 (Icon Update)**: Configured `chromasync.ico` as `<ApplicationIcon>` in `ChromaSync.csproj` and updated `TrayApplicationContext.cs` to extract the tray icon directly from the running executable (`Icon.ExtractAssociatedIcon(Application.ExecutablePath)` with fallback to `SystemIcons.Application`). Verified clean build with 0 errors/warnings.

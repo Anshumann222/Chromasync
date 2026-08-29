@@ -19,7 +19,7 @@ public class TrayApplicationContext : ApplicationContext
         _config = config;
         _onExitRequested = onExitRequested;
 
-        _trayIcon = CreateAppIcon();
+        _trayIcon = LoadAppIcon();
 
         var contextMenu = new ContextMenuStrip();
 
@@ -118,30 +118,11 @@ public class TrayApplicationContext : ApplicationContext
         base.Dispose(disposing);
     }
 
-    private static Icon CreateAppIcon()
+    private static Icon LoadAppIcon()
     {
         try
         {
-            using var bmp = new Bitmap(32, 32);
-            using (var g = Graphics.FromImage(bmp))
-            {
-                g.SmoothingMode = SmoothingMode.AntiAlias;
-                g.Clear(Color.Transparent);
-
-                using var brush = new LinearGradientBrush(
-                    new Rectangle(2, 2, 28, 28),
-                    Color.FromArgb(0, 200, 255),
-                    Color.FromArgb(255, 0, 128),
-                    45f);
-                g.FillEllipse(brush, 2, 2, 28, 28);
-
-                using var innerBrush = new SolidBrush(Color.FromArgb(30, 30, 30));
-                g.FillEllipse(innerBrush, 8, 8, 16, 16);
-
-                using var dotBrush = new SolidBrush(Color.FromArgb(0, 255, 180));
-                g.FillEllipse(dotBrush, 12, 12, 8, 8);
-            }
-            return Icon.FromHandle(bmp.GetHicon());
+            return Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? SystemIcons.Application;
         }
         catch
         {
