@@ -65,3 +65,8 @@ Three deliberately decoupled layers so future peripherals (Cosmic Byte Phantom T
   3. Fixed shutdown race condition on `CancellationTokenSource` with atomic flag guard so cleanup runs cleanly exactly once.
   4. Verified `dotnet build` succeeded with 0 warnings and 0 errors.
 - **2026-08-29 (Icon Update)**: Configured `chromasync.ico` as `<ApplicationIcon>` in `ChromaSync.csproj` and updated `TrayApplicationContext.cs` to extract the tray icon directly from the running executable (`Icon.ExtractAssociatedIcon(Application.ExecutablePath)` with fallback to `SystemIcons.Application`). Verified clean build with 0 errors/warnings.
+- **2026-08-30 (Spotify Minimized / Not-Running Fallback)**:
+  1. Added `IsIconic(IntPtr hWnd)` Win32 P/Invoke in `NativeMethods.cs`.
+  2. Exposed `GetOriginalColor(string? deviceType = null)` in `MysticLightController.cs` to access startup-saved hardware colors without duplicating state.
+  3. Updated `CaptureLoop` in `Program.cs` to check window visibility and minimization (`found && !IsIconic(hWnd)`). When Spotify is minimized or closed, targets the saved startup color and eases smoothly in Lab space. Resumes live capture when restored.
+  4. Added quiet state-transition logging (fallback vs live capture). Verified `dotnet build` succeeded cleanly with 0 warnings and 0 errors.

@@ -17,6 +17,9 @@ internal static class NativeMethods
     public static extern bool IsWindowVisible(IntPtr hWnd);
 
     [DllImport("user32.dll")]
+    public static extern bool IsIconic(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
     public static extern int GetWindowTextLength(IntPtr hWnd);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]

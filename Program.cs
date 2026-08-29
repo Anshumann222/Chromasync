@@ -1,3 +1,4 @@
+using System.Drawing;
 using System.Windows.Forms;
 
 namespace ChromaSync;
@@ -73,7 +74,7 @@ internal static class Program
         catch { }
 
         var token = _cts.Token;
-        _ = Task.Run(() => CaptureLoop(detector, engine, config, token), token);
+        _ = Task.Run(() => CaptureLoop(detector, engine, _light, config, token), token);
         _ = Task.Run(() => RenderLoop(_light, engine, config, token), token);
 
         using var trayContext = new TrayApplicationContext(_light, config, Shutdown);
@@ -116,34 +117,42 @@ internal static class Program
     }
 
     private static async Task CaptureLoop(SpotifyAmbientColorDetector detector, ColorTransitionEngine engine,
-        AppConfig config, CancellationToken token)
+        MysticLightController light, AppConfig config, CancellationToken token)
     {
-        bool lastSpotifyFound = false;
+        bool? lastIsLive = null;
 
         while (!token.IsCancellationRequested)
         {
             bool found = detector.TryFindSpotifyWindow(out var hWnd);
+            bool isMinimized = found && NativeMethods.IsIconic(hWnd);
+            bool isLive = found && !isMinimized;
 
-            if (found != lastSpotifyFound)
+            if (isLive != lastIsLive)
             {
-                lastSpotifyFound = found;
-                if (found)
+                lastIsLive = isLive;
+                if (isLive)
                 {
-                    Logger.Info("[SpotifyDetector] Found active Spotify window.");
+                    Logger.Info("[SpotifyDetector] Spotify window visible. Resuming live ambient color capture.");
                 }
                 else
                 {
-                    Logger.Info("[SpotifyDetector] Lost Spotify window. Waiting for Spotify...");
+                    Logger.Info("[SpotifyDetector] Spotify not visible (minimized or closed). Using original color.");
                 }
             }
 
-            if (found)
+            if (isLive)
             {
                 var color = detector.CaptureAmbientColor(hWnd);
                 if (color is { } c)
                 {
                     engine.SetTarget(c);
                 }
+            }
+            else
+            {
+                var primaryDevice = config.SelectedDeviceTypes.FirstOrDefault();
+                var fallbackColor = (primaryDevice != null ? light.GetOriginalColor(primaryDevice) : null) ?? Color.Black;
+                engine.SetTarget(fallbackColor);
             }
 
             try

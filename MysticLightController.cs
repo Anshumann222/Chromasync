@@ -104,6 +104,22 @@ public class MysticLightController : IDisposable
         }
     }
 
+    public Color? GetOriginalColor(string? deviceType = null)
+    {
+        if (deviceType is not null && _savedColors.TryGetValue(deviceType, out var rgb))
+        {
+            return Color.FromArgb(rgb.R, rgb.G, rgb.B);
+        }
+
+        if (_savedColors.Count > 0)
+        {
+            var first = _savedColors.Values.First();
+            return Color.FromArgb(first.R, first.G, first.B);
+        }
+
+        return null;
+    }
+
     public void SetLedStyle(string type, int index, string style)
     {
         if (!_initialized) return;
