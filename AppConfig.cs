@@ -11,7 +11,7 @@ public class AppConfig
     public List<string> SelectedDeviceTypes { get; set; } = new();
 
     /// <summary>How long a color transition takes, in milliseconds.</summary>
-    public int TransitionDurationMs { get; set; } = 1200;
+    public int TransitionDurationMs { get; set; } = 3500;
 
     /// <summary>How often we re-sample Spotify's window, in milliseconds.</summary>
     public int CaptureIntervalMs { get; set; } = 400;
@@ -19,7 +19,7 @@ public class AppConfig
     /// <summary>How often we push a color to the RGB hardware, in milliseconds.
     /// Kept lower-frequency than the capture/transition tick since most RGB
     /// controllers don't need (or handle well) high-frequency updates.</summary>
-    public int HardwareUpdateIntervalMs { get; set; } = 120;
+    public int HardwareUpdateIntervalMs { get; set; } = 50;
 
     /// <summary>Minimum perceptual (CIE Lab) distance before a newly sampled
     /// color is treated as a real change rather than sampling noise.</summary>
