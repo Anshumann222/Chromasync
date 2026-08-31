@@ -52,6 +52,12 @@ Three deliberately decoupled layers so future peripherals (Cosmic Byte Phantom T
 - Added system tray icon (`TrayApplicationContext.cs`) with context menu: "ChromaSync", status, "Reconfigure Device...", "Open Log File", and "Exit".
 - Added native WinForms device selection dialog (`DevicePickerForm.cs`) for first run and reconfiguration.
 
+### 4. Dormant/Active State Machine (Auto-Launch & Standby Lifecycle)
+- Added lightweight dormant loop polling every 5s for the `Spotify` process without per-tick log noise or hardware access.
+- On Spotify launch, automatically transitions Dormant -> Active: initializes Mystic Light SDK, sets Steady LED style, restores/prompts device config, displays system tray icon, and starts capture/render loops.
+- On Spotify exit, applies a 15-second sustained absence grace period (to prevent flapping during rapid restarts or updates) before transitioning Active -> Dormant: stops loops, restores original hardware colors, releases Mystic Light SDK (`MLAPI_Release`), and hides the tray icon while remaining resident in memory.
+- Tray "Exit" menu item performs a complete application termination and cleanup.
+
 ---
 
 ## Session Log
@@ -70,3 +76,10 @@ Three deliberately decoupled layers so future peripherals (Cosmic Byte Phantom T
   2. Exposed `GetOriginalColor(string? deviceType = null)` in `MysticLightController.cs` to access startup-saved hardware colors without duplicating state.
   3. Updated `CaptureLoop` in `Program.cs` to check window visibility and minimization (`found && !IsIconic(hWnd)`). When Spotify is minimized or closed, targets the saved startup color and eases smoothly in Lab space. Resumes live capture when restored.
   4. Added quiet state-transition logging (fallback vs live capture). Verified `dotnet build` succeeded cleanly with 0 warnings and 0 errors.
+- **2026-08-30 (Dormant/Active State Machine)**:
+  1. Refactored `TrayApplicationContext.cs` to support dynamic `ShowTray` and `HideTray` without re-instantiating the UI context, keeping the application resident silently on login.
+  2. Implemented outer dormant/active state machine in `Program.cs` with a 5-second polling timer and a 15-second continuous absence grace period.
+  3. Dormant state operates with zero tray presence, 0% CPU overhead, no per-tick log noise, and no Mystic Light SDK initialization.
+  4. Active transition initializes SDK, restores/persists device configuration, applies Steady style, presents tray icon, and runs capture/render loops.
+  5. Dormant transition restores initial hardware color, releases SDK (`MLAPI_Release`), cancels active loops, and hides tray icon.
+  6. Verified `dotnet build` succeeded cleanly with 0 warnings and 0 errors.

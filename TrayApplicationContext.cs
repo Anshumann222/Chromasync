@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.Drawing;
-using System.Drawing.Drawing2D;
 using System.Windows.Forms;
 
 namespace ChromaSync;
@@ -8,17 +7,16 @@ namespace ChromaSync;
 public class TrayApplicationContext : ApplicationContext
 {
     private readonly NotifyIcon _notifyIcon;
-    private readonly MysticLightController _light;
+    private readonly ToolStripMenuItem _statusItem;
     private readonly AppConfig _config;
     private readonly Action _onExitRequested;
     private readonly Icon _trayIcon;
+    private MysticLightController? _light;
 
-    public TrayApplicationContext(MysticLightController light, AppConfig config, Action onExitRequested)
+    public TrayApplicationContext(AppConfig config, Action onExitRequested)
     {
-        _light = light;
         _config = config;
         _onExitRequested = onExitRequested;
-
         _trayIcon = LoadAppIcon();
 
         var contextMenu = new ContextMenuStrip();
@@ -29,7 +27,7 @@ public class TrayApplicationContext : ApplicationContext
             Enabled = false
         };
 
-        var statusItem = new ToolStripMenuItem($"Devices: {string.Join(", ", _config.SelectedDeviceTypes)}")
+        _statusItem = new ToolStripMenuItem(GetDevicesStatusText())
         {
             Enabled = false
         };
@@ -39,7 +37,7 @@ public class TrayApplicationContext : ApplicationContext
         var exitItem = new ToolStripMenuItem("Exit", null, OnExitClicked);
 
         contextMenu.Items.Add(titleItem);
-        contextMenu.Items.Add(statusItem);
+        contextMenu.Items.Add(_statusItem);
         contextMenu.Items.Add(new ToolStripSeparator());
         contextMenu.Items.Add(reconfigureItem);
         contextMenu.Items.Add(openLogItem);
@@ -51,12 +49,36 @@ public class TrayApplicationContext : ApplicationContext
             Icon = _trayIcon,
             ContextMenuStrip = contextMenu,
             Text = "ChromaSync — Spotify RGB Sync",
-            Visible = true
+            Visible = false
         };
 
         _notifyIcon.DoubleClick += (s, e) => OpenReconfigureDialog();
+    }
 
-        _notifyIcon.ShowBalloonTip(3000, "ChromaSync", "Running in system tray. Right-click icon for options.", ToolTipIcon.Info);
+    public void ShowTray(MysticLightController light)
+    {
+        _light = light;
+        UpdateDevicesText();
+        _notifyIcon.Visible = true;
+        _notifyIcon.ShowBalloonTip(3000, "ChromaSync", "Spotify active. Running in system tray.", ToolTipIcon.Info);
+    }
+
+    public void HideTray()
+    {
+        _notifyIcon.Visible = false;
+        _light = null;
+    }
+
+    public void UpdateDevicesText()
+    {
+        _statusItem.Text = GetDevicesStatusText();
+    }
+
+    private string GetDevicesStatusText()
+    {
+        return _config.SelectedDeviceTypes.Count > 0
+            ? $"Devices: {string.Join(", ", _config.SelectedDeviceTypes)}"
+            : "Devices: (none)";
     }
 
     private void OnReconfigureClicked(object? sender, EventArgs e)
@@ -66,6 +88,8 @@ public class TrayApplicationContext : ApplicationContext
 
     private void OpenReconfigureDialog()
     {
+        if (_light == null) return;
+
         using var dialog = new DevicePickerForm(_light.Devices, _config.SelectedDeviceTypes);
         if (dialog.ShowDialog() == DialogResult.OK && dialog.SelectedTypes.Count > 0)
         {
@@ -78,6 +102,7 @@ public class TrayApplicationContext : ApplicationContext
                 _light.SetLedStyle(type, 0, "Steady");
             }
 
+            UpdateDevicesText();
             Logger.Info($"[Config] Reconfigured devices: {string.Join(", ", _config.SelectedDeviceTypes)}");
             _notifyIcon.ShowBalloonTip(2000, "ChromaSync", $"Updated devices: {string.Join(", ", _config.SelectedDeviceTypes)}", ToolTipIcon.Info);
         }

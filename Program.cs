@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Drawing;
 using System.Windows.Forms;
 
@@ -5,9 +6,22 @@ namespace ChromaSync;
 
 internal static class Program
 {
+    private enum AppState
+    {
+        Dormant,
+        Active
+    }
+
+    private static AppState _currentState = AppState.Dormant;
+    private static DateTime? _spotifyAbsentSince;
     private static int _shutdownStarted = 0;
-    private static CancellationTokenSource? _cts;
+    private static bool _isStateTransitioning = false;
+
+    private static CancellationTokenSource? _activeCts;
     private static MysticLightController? _light;
+    private static TrayApplicationContext? _trayContext;
+    private static AppConfig _config = null!;
+    private static System.Windows.Forms.Timer? _stateTimer;
 
     [STAThread]
     private static void Main(string[] args)
@@ -15,52 +29,10 @@ internal static class Program
         ApplicationConfiguration.Initialize();
 
         Logger.Info("========================================");
-        Logger.Info("ChromaSync starting up");
+        Logger.Info("ChromaSync starting up (Dormant mode)");
         Logger.Info("========================================");
 
-        var config = AppConfig.LoadOrCreate();
-
-        _light = new MysticLightController();
-        if (!_light.Initialize())
-        {
-            MessageBox.Show("Could not start the Mystic Light SDK.\n\nMake sure MysticLight_SDK.dll is present, MSI Center is installed, and ChromaSync is running as Administrator.",
-                "ChromaSync — Startup Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            Logger.Error("Mystic Light SDK initialization failed. Exiting.");
-            return;
-        }
-
-        if (config.SelectedDeviceTypes.Count == 0 || args.Contains("--reconfigure"))
-        {
-            using var picker = new DevicePickerForm(_light.Devices, config.SelectedDeviceTypes);
-            if (picker.ShowDialog() != DialogResult.OK || picker.SelectedTypes.Count == 0)
-            {
-                Logger.Info("No devices selected in picker. Exiting.");
-                _light.Release();
-                return;
-            }
-
-            config.SelectedDeviceTypes = picker.SelectedTypes;
-            config.Save();
-            Logger.Info($"Selected device(s): {string.Join(", ", config.SelectedDeviceTypes)}");
-        }
-
-        // Save original color state before applying any styles or color changes
-        _light.SaveInitialColors(config.SelectedDeviceTypes);
-
-        foreach (var type in config.SelectedDeviceTypes)
-        {
-            _light.SetLedStyle(type, 0, "Steady");
-        }
-
-        Logger.Info($"Controlling devices: {string.Join(", ", config.SelectedDeviceTypes)}");
-        Logger.Info("Starting capture and render loops in background...");
-
-        var detector = new SpotifyAmbientColorDetector();
-        var engine = new ColorTransitionEngine(
-            TimeSpan.FromMilliseconds(config.TransitionDurationMs),
-            config.ColorChangeThreshold);
-
-        _cts = new CancellationTokenSource();
+        _config = AppConfig.LoadOrCreate();
 
         AppDomain.CurrentDomain.ProcessExit += (_, _) => Shutdown();
         try
@@ -73,12 +45,191 @@ internal static class Program
         }
         catch { }
 
-        var token = _cts.Token;
-        _ = Task.Run(() => CaptureLoop(detector, engine, _light, config, token), token);
-        _ = Task.Run(() => RenderLoop(_light, engine, config, token), token);
+        _trayContext = new TrayApplicationContext(_config, Shutdown);
 
-        using var trayContext = new TrayApplicationContext(_light, config, Shutdown);
-        Application.Run(trayContext);
+        // State polling timer: checks every 5 seconds
+        _stateTimer = new System.Windows.Forms.Timer
+        {
+            Interval = 5000
+        };
+        _stateTimer.Tick += OnStateTimerTick;
+        _stateTimer.Start();
+
+        // Perform an initial state check immediately upon startup
+        CheckState();
+
+        Application.Run(_trayContext);
+    }
+
+    private static void OnStateTimerTick(object? sender, EventArgs e)
+    {
+        CheckState();
+    }
+
+    private static void CheckState()
+    {
+        if (_shutdownStarted != 0 || _isStateTransitioning)
+            return;
+
+        _isStateTransitioning = true;
+        try
+        {
+            bool isRunning = IsSpotifyRunning();
+
+            if (_currentState == AppState.Dormant)
+            {
+                if (isRunning)
+                {
+                    TransitionToActive();
+                }
+            }
+            else if (_currentState == AppState.Active)
+            {
+                if (isRunning)
+                {
+                    _spotifyAbsentSince = null;
+                }
+                else
+                {
+                    if (_spotifyAbsentSince == null)
+                    {
+                        _spotifyAbsentSince = DateTime.UtcNow;
+                    }
+                    else if (DateTime.UtcNow - _spotifyAbsentSince.Value >= TimeSpan.FromSeconds(15))
+                    {
+                        TransitionToDormant();
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Error($"[StateMachine] Error in state check: {ex.Message}");
+        }
+        finally
+        {
+            _isStateTransitioning = false;
+        }
+    }
+
+    private static bool IsSpotifyRunning()
+    {
+        try
+        {
+            var processes = Process.GetProcessesByName("Spotify");
+            bool isRunning = processes.Length > 0;
+            foreach (var p in processes)
+            {
+                p.Dispose();
+            }
+            return isRunning;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static void TransitionToActive()
+    {
+        Logger.Info("[StateMachine] Spotify process detected. Transitioning from Dormant to Active.");
+
+        _light = new MysticLightController();
+        if (!_light.Initialize())
+        {
+            Logger.Error("[StateMachine] Mystic Light SDK initialization failed. Remaining in Dormant state.");
+            _light.Dispose();
+            _light = null;
+            return;
+        }
+
+        if (_config.SelectedDeviceTypes.Count == 0)
+        {
+            using var picker = new DevicePickerForm(_light.Devices, _config.SelectedDeviceTypes);
+            if (picker.ShowDialog() != DialogResult.OK || picker.SelectedTypes.Count == 0)
+            {
+                Logger.Info("[StateMachine] No devices selected in picker. Returning to Dormant.");
+                _light.RestoreOriginalState();
+                _light.Dispose();
+                _light = null;
+                return;
+            }
+
+            _config.SelectedDeviceTypes = picker.SelectedTypes;
+            _config.Save();
+            Logger.Info($"[StateMachine] Selected device(s): {string.Join(", ", _config.SelectedDeviceTypes)}");
+        }
+
+        // Save original color state before applying any styles or color changes
+        _light.SaveInitialColors(_config.SelectedDeviceTypes);
+
+        foreach (var type in _config.SelectedDeviceTypes)
+        {
+            _light.SetLedStyle(type, 0, "Steady");
+        }
+
+        Logger.Info($"[StateMachine] Controlling devices: {string.Join(", ", _config.SelectedDeviceTypes)}");
+        Logger.Info("[StateMachine] Starting capture and render loops in background...");
+
+        var detector = new SpotifyAmbientColorDetector();
+        var engine = new ColorTransitionEngine(
+            TimeSpan.FromMilliseconds(_config.TransitionDurationMs),
+            _config.ColorChangeThreshold);
+
+        _activeCts = new CancellationTokenSource();
+        var token = _activeCts.Token;
+
+        _ = Task.Run(() => CaptureLoop(detector, engine, _light, _config, token), token);
+        _ = Task.Run(() => RenderLoop(_light, engine, _config, token), token);
+
+        _trayContext?.ShowTray(_light);
+
+        _currentState = AppState.Active;
+        _spotifyAbsentSince = null;
+    }
+
+    private static void TransitionToDormant()
+    {
+        Logger.Info("[StateMachine] Spotify process absent for 15s grace period. Transitioning from Active to Dormant.");
+
+        try
+        {
+            _activeCts?.Cancel();
+        }
+        catch (ObjectDisposedException) { }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[StateMachine] Warning cancelling active tasks: {ex.Message}");
+        }
+
+        _trayContext?.HideTray();
+
+        try
+        {
+            _light?.RestoreOriginalState();
+        }
+        catch (Exception ex)
+        {
+            Logger.Error($"[StateMachine] Error restoring light state: {ex.Message}");
+        }
+        finally
+        {
+            _light?.Dispose();
+            _light = null;
+        }
+
+        try
+        {
+            _activeCts?.Dispose();
+        }
+        catch { }
+        finally
+        {
+            _activeCts = null;
+        }
+
+        _spotifyAbsentSince = null;
+        _currentState = AppState.Dormant;
     }
 
     private static void Shutdown()
@@ -90,7 +241,15 @@ internal static class Program
 
         try
         {
-            _cts?.Cancel();
+            _stateTimer?.Stop();
+            _stateTimer?.Dispose();
+            _stateTimer = null;
+        }
+        catch { }
+
+        try
+        {
+            _activeCts?.Cancel();
         }
         catch (ObjectDisposedException) { }
         catch (Exception ex)
@@ -106,6 +265,31 @@ internal static class Program
         {
             Logger.Error($"[Shutdown] Error restoring light state: {ex.Message}");
         }
+        finally
+        {
+            _light?.Dispose();
+            _light = null;
+        }
+
+        try
+        {
+            _activeCts?.Dispose();
+        }
+        catch { }
+        finally
+        {
+            _activeCts = null;
+        }
+
+        try
+        {
+            if (_trayContext != null)
+            {
+                _trayContext.HideTray();
+                _trayContext.Dispose();
+            }
+        }
+        catch { }
 
         try
         {
