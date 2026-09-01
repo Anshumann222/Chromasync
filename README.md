@@ -57,14 +57,14 @@ Found through real hardware debugging on MSI motherboards:
    ChromaSync.exe
    ```
 
-6. **Device Configuration**:
-   On first run, the app lists all discovered Mystic Light devices and prompts you to select the index corresponding to your CPU cooler / fans. This selection is saved locally to `chromasync.config.json`.
+6. **Configuration & Settings**:
+   - **Device Configuration**: On first run, the app prompts you to select the device(s) corresponding to your CPU cooler / fans. You can reconfigure this at any time via the tray menu (**Reconfigure Device...**).
+   - **Live Settings**: Right-click the system tray icon and select **Settings...** to adjust **Transition Speed** (500ms–6000ms) and **Noise Threshold** (0.0–20.0 Lab ΔE) with live-updating sliders. Changes take effect immediately at runtime without requiring an application restart.
+   - **Persistence**: All settings are persisted to `chromasync.config.json` and loaded automatically across restarts.
 
 ## Known limitations
 
 - **Single-zone testing**: Verified only against a single-zone `MSI_MB` device. Motherboards that expose separate addressable zones for individual fan or pump headers may exhibit different indexing behavior.
-- **Shutdown log artifact**: A cosmetic, non-fatal `CancellationTokenSource has been disposed` exception may appear in console output during shutdown after the initial color has already been successfully restored.
-- **UI lifecycle**: Currently runs as an active console window without a system tray icon or background service/auto-start mechanism.
 
 ## Roadmap
 

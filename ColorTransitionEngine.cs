@@ -9,8 +9,8 @@ namespace ChromaSync;
 /// </summary>
 public class ColorTransitionEngine
 {
-    private readonly TimeSpan _duration;
-    private readonly double _changeThreshold;
+    public TimeSpan Duration { get; set; }
+    public double ChangeThreshold { get; set; }
 
     private (double L, double a, double b) _current;
     private (double L, double a, double b) _target;
@@ -20,8 +20,8 @@ public class ColorTransitionEngine
 
     public ColorTransitionEngine(TimeSpan duration, double changeThreshold = 4.0)
     {
-        _duration = duration;
-        _changeThreshold = changeThreshold;
+        Duration = duration;
+        ChangeThreshold = changeThreshold;
     }
 
     public void SetTarget(Color color)
@@ -39,12 +39,12 @@ public class ColorTransitionEngine
         }
 
         double distance = LabDistance(lab, _target);
-        if (distance < _changeThreshold)
+        if (distance < ChangeThreshold)
         {
             return; // treat as sampling noise, not a real color change
         }
 
-        Logger.Info($"[Transition] Accepted color change (Lab dist: {distance:F2} >= threshold: {_changeThreshold:F1}) -> RGB({color.R},{color.G},{color.B})");
+        Logger.Info($"[Transition] Accepted color change (Lab dist: {distance:F2} >= threshold: {ChangeThreshold:F1}) -> RGB({color.R},{color.G},{color.B})");
         _transitionFrom = _current;
         _target = lab;
         _transitionStart = DateTime.UtcNow;
@@ -56,9 +56,9 @@ public class ColorTransitionEngine
         if (!_hasColor)
             return Color.Black;
 
-        double t = _duration.TotalMilliseconds <= 0
+        double t = Duration.TotalMilliseconds <= 0
             ? 1.0
-            : Math.Clamp((DateTime.UtcNow - _transitionStart).TotalMilliseconds / _duration.TotalMilliseconds, 0.0, 1.0);
+            : Math.Clamp((DateTime.UtcNow - _transitionStart).TotalMilliseconds / Duration.TotalMilliseconds, 0.0, 1.0);
 
         double eased = EaseInOutCubic(t);
 

@@ -58,6 +58,13 @@ Three deliberately decoupled layers so future peripherals (Cosmic Byte Phantom T
 - On Spotify exit, applies a 15-second sustained absence grace period (to prevent flapping during rapid restarts or updates) before transitioning Active -> Dormant: stops loops, restores original hardware colors, releases Mystic Light SDK (`MLAPI_Release`), and hides the tray icon while remaining resident in memory.
 - Tray "Exit" menu item performs a complete application termination and cleanup.
 
+### 5. Settings Window & Live Runtime Parameter Updates
+- Added native WinForms `SettingsForm` with sliders for Transition Speed (500ms–6000ms, displayed as human-readable seconds e.g. "3.0s") and Noise Threshold (0.0–20.0 Lab ΔE, displayed e.g. "4.0").
+- Wired "Settings..." option into the system tray context menu in `TrayApplicationContext.cs`.
+- Made `ColorTransitionEngine` parameters (`Duration` and `ChangeThreshold`) mutable at runtime so settings take effect immediately on Save without restarting.
+- Saved settings persist to `chromasync.config.json` via `AppConfig.Save()`.
+- Logged exactly one quiet line on applying settings.
+
 ---
 
 ## Session Log
@@ -83,3 +90,10 @@ Three deliberately decoupled layers so future peripherals (Cosmic Byte Phantom T
   4. Active transition initializes SDK, restores/persists device configuration, applies Steady style, presents tray icon, and runs capture/render loops.
   5. Dormant transition restores initial hardware color, releases SDK (`MLAPI_Release`), cancels active loops, and hides tray icon.
   6. Verified `dotnet build` succeeded cleanly with 0 warnings and 0 errors.
+- **2026-09-02 (Settings Window & Live Runtime Config)**:
+  1. Created `SettingsForm.cs` providing live sliders for Transition Speed (500–6000ms with human-readable seconds e.g. "3.5s") and Noise Threshold (0.0–20.0 Lab ΔE formatted e.g. "4.0").
+  2. Updated `ColorTransitionEngine.cs` to make `Duration` and `ChangeThreshold` settable properties at runtime without modifying Lab color interpolation or easing math.
+  3. Wired "Settings..." context menu item into `TrayApplicationContext.cs` and routed active engine instance from `Program.cs` so changes apply immediately in-memory and persist to `chromasync.config.json` via `AppConfig.Save()`.
+  4. Added single quiet log output on applying settings: `[Config] Applied settings: ...`.
+  5. Updated `README.md` and verified `dotnet build` compiles cleanly with 0 warnings and 0 errors.
+

@@ -12,6 +12,7 @@ public class TrayApplicationContext : ApplicationContext
     private readonly Action _onExitRequested;
     private readonly Icon _trayIcon;
     private MysticLightController? _light;
+    private ColorTransitionEngine? _engine;
 
     public TrayApplicationContext(AppConfig config, Action onExitRequested)
     {
@@ -32,6 +33,7 @@ public class TrayApplicationContext : ApplicationContext
             Enabled = false
         };
 
+        var settingsItem = new ToolStripMenuItem("Settings...", null, OnSettingsClicked);
         var reconfigureItem = new ToolStripMenuItem("Reconfigure Device...", null, OnReconfigureClicked);
         var openLogItem = new ToolStripMenuItem("Open Log File", null, OnOpenLogClicked);
         var exitItem = new ToolStripMenuItem("Exit", null, OnExitClicked);
@@ -39,6 +41,7 @@ public class TrayApplicationContext : ApplicationContext
         contextMenu.Items.Add(titleItem);
         contextMenu.Items.Add(_statusItem);
         contextMenu.Items.Add(new ToolStripSeparator());
+        contextMenu.Items.Add(settingsItem);
         contextMenu.Items.Add(reconfigureItem);
         contextMenu.Items.Add(openLogItem);
         contextMenu.Items.Add(new ToolStripSeparator());
@@ -55,9 +58,10 @@ public class TrayApplicationContext : ApplicationContext
         _notifyIcon.DoubleClick += (s, e) => OpenReconfigureDialog();
     }
 
-    public void ShowTray(MysticLightController light)
+    public void ShowTray(MysticLightController light, ColorTransitionEngine? engine = null)
     {
         _light = light;
+        _engine = engine;
         UpdateDevicesText();
         _notifyIcon.Visible = true;
         _notifyIcon.ShowBalloonTip(3000, "ChromaSync", "Spotify active. Running in system tray.", ToolTipIcon.Info);
@@ -67,6 +71,7 @@ public class TrayApplicationContext : ApplicationContext
     {
         _notifyIcon.Visible = false;
         _light = null;
+        _engine = null;
     }
 
     public void UpdateDevicesText()
@@ -79,6 +84,30 @@ public class TrayApplicationContext : ApplicationContext
         return _config.SelectedDeviceTypes.Count > 0
             ? $"Devices: {string.Join(", ", _config.SelectedDeviceTypes)}"
             : "Devices: (none)";
+    }
+
+    private void OnSettingsClicked(object? sender, EventArgs e)
+    {
+        OpenSettingsDialog();
+    }
+
+    private void OpenSettingsDialog()
+    {
+        using var dialog = new SettingsForm(_config.TransitionDurationMs, _config.ColorChangeThreshold);
+        if (dialog.ShowDialog() == DialogResult.OK)
+        {
+            _config.TransitionDurationMs = dialog.TransitionDurationMs;
+            _config.ColorChangeThreshold = dialog.ColorChangeThreshold;
+            _config.Save();
+
+            if (_engine != null)
+            {
+                _engine.Duration = TimeSpan.FromMilliseconds(_config.TransitionDurationMs);
+                _engine.ChangeThreshold = _config.ColorChangeThreshold;
+            }
+
+            Logger.Info($"[Config] Applied settings: TransitionDuration={_config.TransitionDurationMs}ms ({(dialog.TransitionDurationMs / 1000.0):0.0}s), ColorChangeThreshold={_config.ColorChangeThreshold:0.0}");
+        }
     }
 
     private void OnReconfigureClicked(object? sender, EventArgs e)

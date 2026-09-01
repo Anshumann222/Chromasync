@@ -182,7 +182,7 @@ internal static class Program
         _ = Task.Run(() => CaptureLoop(detector, engine, _light, _config, token), token);
         _ = Task.Run(() => RenderLoop(_light, engine, _config, token), token);
 
-        _trayContext?.ShowTray(_light);
+        _trayContext?.ShowTray(_light, engine);
 
         _currentState = AppState.Active;
         _spotifyAbsentSince = null;
